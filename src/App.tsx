@@ -101,8 +101,8 @@ const Searchbar: React.FC<SearchbarProps> = ({
   };
 
   const placeholder = hasInitialSummary
-    ? "📰 Ask for a follow-up"
-    : "🔍 Search what's happening";
+    ? " 📰 Ask for a follow-up"
+    : " 🔍 Search what's happening";
   const baseClasses =
     "w-full p-3 pr-10 rounded-full border shadow-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ";
   const colorClasses =
@@ -158,7 +158,7 @@ const ChatDisplay: React.FC<{ conversation: Message[] }> = ({
     {conversation.map((message) => {
       const { id, isUser, type, text, initialQuery } = message;
       const bubbleClasses = isUser
-        ? "bg-blue-600 text-white rounded-br-none"
+        ? "rounded-br-none"
         : type === "summary"
           ? "bg-white text-gray-900 dark:bg-neutral-800/33 dark:text-neutral-100 rounded-bl-none"
           : "bg-neutral-200 text-gray-900 dark:bg-neutral-700 dark:text-neutral-100 rounded-bl-none";
@@ -170,7 +170,7 @@ const ChatDisplay: React.FC<{ conversation: Message[] }> = ({
             className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${bubbleClasses}`}
           >
             {type === "summary" && (
-              <h3 className="font-semibold text-lg mb-2 border-b pb-1 dark:border-neutral-600">
+              <h3 className="font-semibold text-lg mb-2 pb-1 dark:border-neutral-600">
                 Briefing on: {initialQuery}
               </h3>
             )}
