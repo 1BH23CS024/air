@@ -1,184 +1,139 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { summarizeCSV, answerFromSummary } from "./lib/summarizeCSV";
+import {
+  summarizeCSV,
+  answerFromSummary,
+  mergeSummaries,
+  generalSearch,
+} from "./lib/summarizeCSV";
 import { parseKeywords } from "./lib/keywordParser";
-import Logo from "/logo.svg";
+import Logo from "/svg/app_logo.svg";
+import Back from "/svg/back.svg";
 
-interface Message {
+type Message = {
   id: number;
   type: "summary" | "question" | "answer";
   text: string;
   isUser: boolean;
   initialQuery?: string;
-}
-
-interface SearchbarProps {
-  query: string;
-  setQuery: React.Dispatch<React.SetStateAction<string>>;
-  isSearching: boolean;
-  onSearchSubmit: (text: string) => Promise<void>;
-  hasInitialSummary: boolean;
-}
+};
+type SearchMode = "general" | "merge" | "followup" | "rss";
 
 const KeywordMarquee: React.FC<{
   keywords: string[];
-  onKeywordClick: (keyword: string) => Promise<void>;
+  onKeywordClick: (k: string) => void;
   isSearching: boolean;
 }> = ({ keywords, onKeywordClick, isSearching }) => {
-  if (keywords.length === 0) return null;
-
-  const NUM_ROWS = 6;
-  const animationPlayState = isSearching ? "paused" : "running";
-
-  const L = keywords.length;
-
-  const rows = Array.from({ length: NUM_ROWS }, (_, i) => {
-    const offset = (i * 7) % L;
-
-    const offsetKeywords = [
-      ...keywords.slice(offset),
-      ...keywords.slice(0, offset),
-    ];
-    const directionClass =
-      i % 2 === 0 ? "animate-marquee-left" : "animate-marquee-right";
-    const duration = `${(keywords.length + 6) * 0.2 + i * 0.5}s`;
-
-    return {
-      id: i,
-      keywords: offsetKeywords,
-      directionClass,
-      duration,
-    };
-  });
+  if (!keywords.length) return null;
+  const rows = Array.from({ length: 6 }, (_, i) => ({
+    id: i,
+    items: [
+      ...keywords.slice((i * 7) % keywords.length),
+      ...keywords.slice(0, (i * 7) % keywords.length),
+    ],
+    dir: i % 2 === 0 ? "animate-marquee-left" : "animate-marquee-right",
+    dur: `${(keywords.length + 6) * 0.2 + i * 0.5}s`,
+  }));
 
   return (
     <div className="absolute top-full left-0 right-0 mt-4 overflow-hidden h-60">
-      {rows.map(({ id, keywords: rowKeywords, directionClass, duration }) => (
+      {rows.map(({ id, items, dir, dur }) => (
         <div
           key={id}
-          className={`flex whitespace-nowrap ${directionClass} h-10 items-center`}
+          className={`flex whitespace-nowrap ${dir} h-10 items-center`}
           style={
             {
               width: "200%",
-              "--marquee-duration": duration,
-              animationPlayState,
+              "--marquee-duration": dur,
+              animationPlayState: isSearching ? "paused" : "running",
             } as React.CSSProperties
           }
         >
-          {[...rowKeywords, ...rowKeywords].map((keyword, index) => (
+          {[...items, ...items].map((k, j) => (
             <button
-              key={index}
-              onClick={() => onKeywordClick(keyword)}
+              key={j}
+              onClick={() => onKeywordClick(k)}
               disabled={isSearching}
-              className={`
-                inline-flex items-center px-4 py-2 mx-2 text-sm font-mono rounded-full transition-all duration-300
-                bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-700
-                ${isSearching ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:scale-[1.02]"}
-              `}
+              className={`inline-flex items-center px-4 py-2 mx-2 text-sm font-mono rounded-full transition-all duration-300 bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-700 ${isSearching ? "opacity-50" : "hover:scale-[1.02]"}`}
             >
-              {keyword}
+              {k}
             </button>
           ))}
         </div>
       ))}
-      <div className="absolute top-0 left-0 w-10 h-full bg-gradient-to-r from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
-      <div className="absolute top-0 right-0 w-10 h-full bg-gradient-to-l from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
+      <div className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
+      <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
     </div>
   );
 };
 
-const Searchbar: React.FC<SearchbarProps> = ({
-  query,
-  setQuery,
-  isSearching,
-  onSearchSubmit,
-  hasInitialSummary,
-}) => {
-  const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !isSearching) {
-      const trimmed = query.trim();
-      if (trimmed) await onSearchSubmit(trimmed);
-    }
-  };
-
-  const placeholder = hasInitialSummary
-    ? " 📰 Ask for a follow-up"
-    : " 🔍 Search what's happening";
-  const baseClasses =
-    "w-full p-3 pr-10 rounded-full border shadow-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ";
-  const colorClasses =
-    "bg-white text-gray-900 placeholder-gray-500 border-gray-200 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder-neutral-400 dark:border-neutral-700 ";
-  const disabledClass = isSearching ? "opacity-80" : "";
-
-  return (
-    <div className="relative">
-      <input
-        type="text"
-        placeholder={placeholder}
-        className={baseClasses + colorClasses + disabledClass}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={handleKeyDown}
-        aria-label="Search"
-        aria-busy={isSearching}
-        disabled={isSearching}
-      />
-      {isSearching && (
-        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-          <svg
-            className="animate-spin h-5 w-5 text-blue-500"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            ></circle>
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-            />
-          </svg>
-        </div>
-      )}
-    </div>
-  );
-};
+const Searchbar: React.FC<{
+  query: string;
+  setQuery: (s: string) => void;
+  isSearching: boolean;
+  onSearchSubmit: (t: string) => void;
+  hasSummary: boolean;
+}> = ({ query, setQuery, isSearching, onSearchSubmit, hasSummary }) => (
+  <div className="relative">
+    <input
+      type="text"
+      placeholder={
+        hasSummary
+          ? " 🤔 Follow up or use '~' for new topics"
+          : " 🔍 Search or '~' for direct AI chat"
+      }
+      className={`w-full p-3 pr-10 rounded-full border shadow-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white text-gray-900 dark:bg-neutral-700 dark:text-neutral-100 dark:border-neutral-700 ${isSearching ? "opacity-80" : ""}`}
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      onKeyDown={(e) =>
+        e.key === "Enter" &&
+        !isSearching &&
+        query.trim() &&
+        onSearchSubmit(query.trim())
+      }
+      disabled={isSearching}
+    />
+    {isSearching && (
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin">
+        <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+          />
+        </svg>
+      </div>
+    )}
+  </div>
+);
 
 const ChatDisplay: React.FC<{ conversation: Message[] }> = ({
   conversation,
 }) => (
   <div className="w-full max-w-2xl flex flex-col gap-4">
-    {conversation.map((message) => {
-      const { id, isUser, type, text, initialQuery } = message;
-      const bubbleClasses = isUser
-        ? "rounded-br-none"
-        : type === "summary"
-          ? "bg-white text-gray-900 dark:bg-neutral-800/33 dark:text-neutral-100 rounded-bl-none"
-          : "bg-neutral-200 text-gray-900 dark:bg-neutral-700 dark:text-neutral-100 rounded-bl-none";
-      const alignmentClass = isUser ? "justify-end" : "justify-center";
-
-      return (
-        <div key={id} id={`message-${id}`} className={`flex ${alignmentClass}`}>
-          <div
-            className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${bubbleClasses}`}
-          >
-            {type === "summary" && (
-              <h3 className="font-semibold text-lg mb-2 pb-1 dark:border-neutral-600">
-                Briefing on: {initialQuery}
-              </h3>
-            )}
-            {text}
-          </div>
+    {conversation.map(({ id, isUser, type, text, initialQuery }) => (
+      <div
+        key={id}
+        id={`message-${id}`}
+        className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      >
+        <div
+          className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${isUser ? "bg-neutral-200 dark:bg-neutral-700 rounded-br-none" : "bg-white dark:bg-neutral-800/33 rounded-bl-none text-gray-900 dark:text-neutral-100"}`}
+        >
+          {type === "summary" && (
+            <h3 className="font-semibold text-lg mb-2 pb-1">{initialQuery}</h3>
+          )}
+          {text}
         </div>
-      );
-    })}
+      </div>
+    ))}
   </div>
 );
 
@@ -186,208 +141,208 @@ const App: React.FC = () => {
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [keywordList, setKeywordList] = useState<string[]>([]);
-  const [lastInitialQuery, setLastInitialQuery] = useState<string | null>(null);
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [rootQuery, setRootQuery] = useState<string | null>(null);
+  const [isNewsSession, setIsNewsSession] = useState(false);
 
-  const nextIdRef = useRef(0);
-  const generateUniqueId = () => nextIdRef.current++;
+  // New State: Controls layout (sticky header vs centered) independently of conversation content
+  const [isResultMode, setIsResultMode] = useState(false);
+
+  const nextId = useRef(0);
 
   useEffect(() => {
-    const fetchKeywords = async () => {
-      try {
-        const response = await fetch("/keywords.txt");
-        if (!response.ok)
-          throw new Error(
-            `Failed to fetch keywords. Status: ${response.status}`
-          );
-
-        const fileContent = await response.text();
-        setKeywordList(parseKeywords(fileContent));
-      } catch (error) {
-        console.error("Error loading keywords from /keywords.txt:", error);
-        setKeywordList([]);
-      }
-    };
-    fetchKeywords();
+    fetch("/keywords.txt")
+      .then((r) => (r.ok ? r.text() : ""))
+      .then((t) => setKeywords(parseKeywords(t)))
+      .catch(() => setKeywords([]));
   }, []);
 
-  const hasInitialSummary = conversation.length > 0;
-  const initialSummaryText =
-    conversation.find((m) => m.type === "summary")?.text || "";
+  const hasSummary = conversation.length > 0;
+  // Only extract context from News Summaries (📰), ignoring General Search bubbles (🔍)
+  const summaryText =
+    [...conversation]
+      .reverse()
+      .find((m) => m.type === "summary" && m.initialQuery?.startsWith("📰"))
+      ?.text || "";
 
-  const handleNewMessage = (message: Message) => {
-    setConversation((prev) => [...prev, message]);
-  };
+  const addMsg = (msg: Partial<Message>) =>
+    setConversation((p) => [
+      ...p,
+      {
+        id: nextId.current++,
+        isUser: false,
+        type: "answer",
+        text: "",
+        ...msg,
+      } as Message,
+    ]);
 
-  const handleBack = () => {
+  const reset = () => {
     setConversation([]);
-    setLastInitialQuery(null);
+    setLastQuery(null);
+    setRootQuery(null);
     setQuery("");
-  };
-
-  const handleRefresh = async () => {
-    if (lastInitialQuery) {
-      // setConversation([]);
-      await executeSearch(lastInitialQuery, true);
-    }
+    setIsNewsSession(false);
+    setIsResultMode(false); // Only reset layout on manual Back
   };
 
   const executeSearch = useCallback(
-    async (text: string, forceInitialSummary = false) => {
-      const trimmed = text.trim();
-      if (!trimmed || isSearching) return;
-
+    async (text: string, forceNew = false) => {
+      if (!text || isSearching) return;
       setIsSearching(true);
       setQuery("");
 
-      const shouldBeFollowUp = hasInitialSummary && !forceInitialSummary;
+      const isGeneral = text.startsWith("~");
+      const isMerge = text.startsWith("+") && hasSummary && isNewsSession;
 
-      let currentInitialQuery: string | undefined;
-      const messageId = generateUniqueId();
-      let messageType: "summary" | "answer" = "answer";
+      const clean = (isMerge || isGeneral ? text.slice(1) : text).trim();
+      if (!clean) {
+        setIsSearching(false);
+        return;
+      }
 
-      if (shouldBeFollowUp) {
-        handleNewMessage({
-          id: generateUniqueId(),
+      const mode: SearchMode = isGeneral
+        ? "general"
+        : isMerge
+          ? "merge"
+          : hasSummary && !forceNew && isNewsSession
+            ? "followup"
+            : "rss";
+
+      // Lock layout to "Result Mode" immediately
+      setIsResultMode(true);
+
+      if (mode === "rss") setIsNewsSession(true);
+
+      // UI Updates
+      if (mode === "followup") {
+        addMsg({ type: "question", text: `📰 ${clean}`, isUser: true });
+      } else if (mode === "merge") {
+        addMsg({
           type: "question",
-          text: trimmed,
+          text: `➕ Adding "${clean}"...`,
           isUser: true,
         });
       } else {
-        currentInitialQuery = trimmed;
-        messageType = "summary";
-        setLastInitialQuery(trimmed);
+        // Logic Change:
+        // 1. If RSS (New Topic): Clear immediately. Layout stays sticky due to isResultMode.
+        // 2. If Refresh (forceNew): Do NOT clear yet. Keep old result visible while loading.
+        if (mode === "rss" && !forceNew) setConversation([]);
+
+        if (mode === "general")
+          addMsg({ type: "question", text: `🔍 ${clean}`, isUser: true });
+      }
+
+      const currentCleanQuery =
+        mode === "merge" ? `${lastQuery} + ${clean}` : clean;
+      if (mode !== "followup" && mode !== "general") {
+        setLastQuery(currentCleanQuery);
+        if (mode !== "merge") setRootQuery(clean);
       }
 
       try {
-        let responseText: string;
-
-        if (shouldBeFollowUp) {
-          responseText = await answerFromSummary(initialSummaryText, trimmed);
-        } else {
-          const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(trimmed)}&hl=en-IN&gl=IN&ceid=IN:en`;
+        let result = "";
+        const fetchRSS = async () => {
           const res = await fetch("/api/parse-rss", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: rssUrl }),
+            body: JSON.stringify({
+              url: `https://news.google.com/rss/search?q=${encodeURIComponent(clean)}&hl=en-IN&gl=IN&ceid=IN:en`,
+            }),
           });
-
-          if (!res.ok) throw new Error(`Network error: ${res.status}`);
-
-          const output = await res.text();
-          responseText = await summarizeCSV(output);
-        }
-
-        if (forceInitialSummary) {
-          setConversation([]);
-        }
-
-        const modelResponseMessage: Message = {
-          id: messageId,
-          type: messageType,
-          text: responseText,
-          isUser: false,
-          initialQuery: currentInitialQuery,
+          if (!res.ok) throw new Error(res.statusText);
+          return summarizeCSV(await res.text());
         };
 
-        handleNewMessage(modelResponseMessage);
+        switch (mode) {
+          case "general":
+            result = await generalSearch(clean);
+            break;
+          case "followup":
+            result = await answerFromSummary(summaryText, clean);
+            break;
+          case "merge":
+            result = await mergeSummaries(summaryText, await fetchRSS());
+            break;
+          case "rss":
+            result = await fetchRSS();
+            break;
+        }
 
-        setTimeout(() => {
-          document
-            .getElementById(`message-${modelResponseMessage.id}`)
-            ?.scrollIntoView({ behavior: "smooth", block: "end" });
-        }, 50);
-      } catch (err: any) {
-        console.error(err);
-        handleNewMessage({
-          id: messageId,
-          type: "answer",
-          text: `⚠️ Error fetching results. ${err?.message ?? ""}`,
+        const resMsgId = nextId.current;
+        const headerIcon = mode === "general" ? "🔍" : "📰";
+        const displayQuery = `${headerIcon} ${currentCleanQuery}`;
+        const newMessage: Message = {
+          id: resMsgId,
+          type: mode === "followup" ? "answer" : "summary",
+          text: result,
+          initialQuery: displayQuery,
           isUser: false,
-        });
+        };
+
+        // Handle Refresh/Replacement logic here
+        if (forceNew || (mode === "rss" && !forceNew)) {
+          // If refreshing or new RSS, we replace the conversation.
+          // For 'rss', we already cleared above, so this acts as set.
+          // For 'forceNew', we overwrite the old result now.
+          setConversation([newMessage]);
+          nextId.current++; // Increment ref since we manually created the object
+        } else {
+          addMsg(newMessage);
+        }
+
+        setTimeout(
+          () =>
+            document
+              .getElementById(`message-${resMsgId}`)
+              ?.scrollIntoView({ behavior: "smooth", block: "end" }),
+          50
+        );
+      } catch (err: any) {
+        addMsg({ text: `⚠️ Error: ${err.message}` });
       } finally {
         setIsSearching(false);
       }
     },
-    [hasInitialSummary, initialSummaryText, isSearching, setConversation]
+    [hasSummary, summaryText, isSearching, lastQuery, isNewsSession]
   );
-
-  const logoBaseClass = "transition-all duration-500 ease-in-out";
-  const titleClass = hasInitialSummary ? "text-3xl" : "text-5xl sm:text-6xl";
-  const taglineClass = hasInitialSummary
-    ? "opacity-0 h-0"
-    : "opacity-100 h-auto mb-4";
-  const headerContainerClass = hasInitialSummary
-    ? "sticky top-0 pt-3 pb-2 bg-gray-100 dark:bg-neutral-900"
-    : "mt-20 md:mt-28";
-  const resultsVisibilityClass = hasInitialSummary
-    ? "opacity-100 pointer-events-auto"
-    : "opacity-0 pointer-events-none";
-  const searchbarPositionClass = hasInitialSummary
-    ? "fixed left-0 right-0 bottom-24"
-    : "mt-12 md:mt-20";
 
   return (
     <div className="min-h-screen w-full bg-gray-100 dark:bg-neutral-900 text-gray-900 dark:text-neutral-100 overflow-auto">
       <style>{`
-        @keyframes marquee-left {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        @keyframes marquee-right {
-          0% { transform: translateX(-50%); } 
-          100% { transform: translateX(0); }
-        }
-        .animate-marquee-left {
-          animation: marquee-left var(--marquee-duration) linear infinite;
-        }
-        .animate-marquee-right {
-          animation: marquee-right var(--marquee-duration) linear infinite;
-        }
+        @keyframes marquee-left { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        @keyframes marquee-right { 0% { transform: translateX(-50%); } 100% { transform: translateX(0); } }
+        .animate-marquee-left { animation: marquee-left var(--marquee-duration) linear infinite; }
+        .animate-marquee-right { animation: marquee-right var(--marquee-duration) linear infinite; }
       `}</style>
 
       <div
-        className={`flex flex-col items-center gap-3 ${logoBaseClass} z-10 ${headerContainerClass}`}
+        className={`flex flex-col items-center gap-3 transition-all duration-500 z-10 ${isResultMode ? "sticky top-0 pt-3 pb-2 bg-gray-100 dark:bg-neutral-900" : "mt-20 md:mt-28"}`}
       >
         <div className="w-full flex justify-center relative">
-          {hasInitialSummary && (
+          {isResultMode && (
             <button
-              onClick={handleBack}
+              onClick={reset}
               disabled={isSearching}
-              className="absolute left-4 top-1/2 transform -translate-y-1/2 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
-              aria-label="Back to initial search"
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 disabled:opacity-50"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                />
-              </svg>
+              <img src={Back} alt="Back" className="h-6 w-6" />
             </button>
           )}
           <div className="flex items-center">
-            <img src={Logo} alt="App Logo" className="h-10 w-auto" />
+            <img src={Logo} alt="Logo" className="h-10 w-auto" />
             <h1
-              className={`ml-3 font-semibold pointer-events-none ${logoBaseClass} ${titleClass}`}
+              className={`ml-3 font-semibold pointer-events-none transition-all duration-500 ${isResultMode ? "text-3xl" : "text-6xl"}`}
             >
               AIR
             </h1>
           </div>
-
-          {hasInitialSummary && (
+          {isResultMode && (
             <button
-              onClick={handleRefresh}
+              onClick={() => rootQuery && executeSearch(rootQuery, true)}
               disabled={isSearching}
-              className="absolute right-4 top-1/2 transform -translate-y-1/2 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
-              aria-label="Refresh search results"
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 disabled:opacity-50"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -406,9 +361,8 @@ const App: React.FC = () => {
             </button>
           )}
         </div>
-
         <div
-          className={`text-gray-500 dark:text-neutral-400 text-base transition-opacity duration-300 ${taglineClass}`}
+          className={`text-gray-500 dark:text-neutral-400 transition-opacity duration-300 ${isResultMode ? "opacity-0 h-0" : "opacity-100 mb-4"}`}
         >
           A News Engine powered by AI + RSS feeds
         </div>
@@ -416,19 +370,13 @@ const App: React.FC = () => {
 
       <div
         id="results"
-        className={`w-full flex justify-center transition-all duration-300 ease-out py-4 px-4 ${resultsVisibilityClass}`}
+        className={`w-full flex justify-center transition-all duration-300 py-4 px-4 ${isResultMode ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         <ChatDisplay conversation={conversation} />
       </div>
 
-      <div className="px-4">
-        <div className="w-full max-w-3xl mx-auto py-6">
-          <p className="text-sm text-muted-foreground"></p>
-        </div>
-      </div>
-
       <div
-        className={`w-full flex justify-center z-50 px-4 pointer-events-auto transition-all duration-500 ${searchbarPositionClass}`}
+        className={`w-full flex justify-center z-50 px-4 transition-all duration-500 ${isResultMode ? "fixed left-0 right-0 bottom-24" : "mt-12 md:mt-20"}`}
       >
         <div className="w-full max-w-xl relative">
           <Searchbar
@@ -436,19 +384,18 @@ const App: React.FC = () => {
             setQuery={setQuery}
             isSearching={isSearching}
             onSearchSubmit={executeSearch}
-            hasInitialSummary={hasInitialSummary}
+            hasSummary={hasSummary}
           />
-          {!hasInitialSummary && (
+          {!isResultMode && (
             <KeywordMarquee
-              keywords={keywordList}
+              keywords={keywords}
               onKeywordClick={executeSearch}
               isSearching={isSearching}
             />
           )}
         </div>
       </div>
-
-      <div className={hasInitialSummary ? "h-40" : "h-20"} />
+      <div className={isResultMode ? "h-40" : "h-20"} />
     </div>
   );
 };
