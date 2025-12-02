@@ -4,7 +4,7 @@ import {
   answerFromSummary,
   mergeSummaries,
   generalSearch,
-} from "./lib/summarizeCSV";
+} from "./lib/helperAI";
 import { parseKeywords } from "./lib/keywordParser";
 import Logo from "/svg/app_logo.svg";
 import Back from "/svg/back.svg";
@@ -70,16 +70,24 @@ const Searchbar: React.FC<{
   query: string;
   setQuery: (s: string) => void;
   isSearching: boolean;
+  showLoading: boolean;
   onSearchSubmit: (t: string) => void;
   hasSummary: boolean;
-}> = ({ query, setQuery, isSearching, onSearchSubmit, hasSummary }) => (
+}> = ({
+  query,
+  setQuery,
+  isSearching,
+  showLoading,
+  onSearchSubmit,
+  hasSummary,
+}) => (
   <div className="relative">
     <input
       type="text"
       placeholder={
         hasSummary
-          ? " 🤔 Follow up or use '~' for new topics"
-          : " 🔍 Search or '~' for direct AI chat"
+          ? " 🤔 Follow up or use '+' to add a topic"
+          : " 🔍 Search what's happening"
       }
       className={`w-full p-3 pr-10 rounded-full border shadow-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white text-gray-900 dark:bg-neutral-700 dark:text-neutral-100 dark:border-neutral-700 ${isSearching ? "opacity-80" : ""}`}
       value={query}
@@ -92,7 +100,7 @@ const Searchbar: React.FC<{
       }
       disabled={isSearching}
     />
-    {isSearching && (
+    {showLoading && (
       <div className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin">
         <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
           <circle
@@ -125,7 +133,7 @@ const ChatDisplay: React.FC<{ conversation: Message[] }> = ({
         className={`flex ${isUser ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${isUser ? "bg-neutral-200 dark:bg-neutral-700 rounded-br-none" : "bg-white dark:bg-neutral-800/33 rounded-bl-none text-gray-900 dark:text-neutral-100"}`}
+          className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${isUser ? "bg-neutral-200 dark:bg-neutral-700 rounded-tr-none" : "bg-white dark:bg-neutral-800/50 rounded-tl-none text-gray-900 dark:text-neutral-100"}`}
         >
           {type === "summary" && (
             <h3 className="font-semibold text-lg mb-2 pb-1">{initialQuery}</h3>
@@ -141,12 +149,11 @@ const App: React.FC = () => {
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const [rootQuery, setRootQuery] = useState<string | null>(null);
   const [isNewsSession, setIsNewsSession] = useState(false);
-
-  // New State: Controls layout (sticky header vs centered) independently of conversation content
   const [isResultMode, setIsResultMode] = useState(false);
 
   const nextId = useRef(0);
@@ -159,7 +166,6 @@ const App: React.FC = () => {
   }, []);
 
   const hasSummary = conversation.length > 0;
-  // Only extract context from News Summaries (📰), ignoring General Search bubbles (🔍)
   const summaryText =
     [...conversation]
       .reverse()
@@ -184,13 +190,16 @@ const App: React.FC = () => {
     setRootQuery(null);
     setQuery("");
     setIsNewsSession(false);
-    setIsResultMode(false); // Only reset layout on manual Back
+    setIsResultMode(false);
   };
 
   const executeSearch = useCallback(
-    async (text: string, forceNew = false) => {
+    async (text: string, forceNew = false, isRefreshEvent = false) => {
       if (!text || isSearching) return;
+
       setIsSearching(true);
+      if (isRefreshEvent) setIsRefreshing(true);
+
       setQuery("");
 
       const isGeneral = text.startsWith("~");
@@ -199,6 +208,7 @@ const App: React.FC = () => {
       const clean = (isMerge || isGeneral ? text.slice(1) : text).trim();
       if (!clean) {
         setIsSearching(false);
+        setIsRefreshing(false);
         return;
       }
 
@@ -210,26 +220,18 @@ const App: React.FC = () => {
             ? "followup"
             : "rss";
 
-      // Lock layout to "Result Mode" immediately
-      setIsResultMode(true);
-
       if (mode === "rss") setIsNewsSession(true);
 
-      // UI Updates
       if (mode === "followup") {
         addMsg({ type: "question", text: `📰 ${clean}`, isUser: true });
       } else if (mode === "merge") {
         addMsg({
           type: "question",
-          text: `➕ Adding "${clean}"...`,
+          text: `📝 Adding "${clean}"`,
           isUser: true,
         });
       } else {
-        // Logic Change:
-        // 1. If RSS (New Topic): Clear immediately. Layout stays sticky due to isResultMode.
-        // 2. If Refresh (forceNew): Do NOT clear yet. Keep old result visible while loading.
         if (mode === "rss" && !forceNew) setConversation([]);
-
         if (mode === "general")
           addMsg({ type: "question", text: `🔍 ${clean}`, isUser: true });
       }
@@ -270,6 +272,8 @@ const App: React.FC = () => {
             break;
         }
 
+        setIsResultMode(true);
+
         const resMsgId = nextId.current;
         const headerIcon = mode === "general" ? "🔍" : "📰";
         const displayQuery = `${headerIcon} ${currentCleanQuery}`;
@@ -281,13 +285,9 @@ const App: React.FC = () => {
           isUser: false,
         };
 
-        // Handle Refresh/Replacement logic here
         if (forceNew || (mode === "rss" && !forceNew)) {
-          // If refreshing or new RSS, we replace the conversation.
-          // For 'rss', we already cleared above, so this acts as set.
-          // For 'forceNew', we overwrite the old result now.
           setConversation([newMessage]);
-          nextId.current++; // Increment ref since we manually created the object
+          nextId.current++;
         } else {
           addMsg(newMessage);
         }
@@ -300,9 +300,11 @@ const App: React.FC = () => {
           50
         );
       } catch (err: any) {
+        setIsResultMode(true);
         addMsg({ text: `⚠️ Error: ${err.message}` });
       } finally {
         setIsSearching(false);
+        setIsRefreshing(false);
       }
     },
     [hasSummary, summaryText, isSearching, lastQuery, isNewsSession]
@@ -340,13 +342,13 @@ const App: React.FC = () => {
           </div>
           {isResultMode && (
             <button
-              onClick={() => rootQuery && executeSearch(rootQuery, true)}
+              onClick={() => rootQuery && executeSearch(rootQuery, true, true)}
               disabled={isSearching}
               className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 disabled:opacity-50"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className={`h-6 w-6 ${isSearching ? "animate-spin" : ""}`}
+                className={`h-6 w-6 ${isRefreshing ? "animate-spin" : ""}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -383,6 +385,7 @@ const App: React.FC = () => {
             query={query}
             setQuery={setQuery}
             isSearching={isSearching}
+            showLoading={isSearching && !isRefreshing}
             onSearchSubmit={executeSearch}
             hasSummary={hasSummary}
           />
