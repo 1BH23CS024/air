@@ -1,16 +1,23 @@
 # AIR
 
-A News Engine powered by AI+RSS Feeds
+**AIR** — A news engine powered by **AI**+**R**SS Feeds.
 
-## Run
+Search any news. Ask for follow ups.
 
-- Run server
+Supercharge prompt with prefixes:
+
+\+ : To add new sources<br>
+~ : To ask any question
+
+### Run
+
+Run server
 
 ```js
 npx tsx server/proxy.ts
 ```
 
-- Run project
+Run client
 
 ```js
 npm run dev
