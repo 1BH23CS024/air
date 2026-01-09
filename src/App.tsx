@@ -60,8 +60,8 @@ const KeywordMarquee: React.FC<{
           ))}
         </div>
       ))}
-      <div className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
-      <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
+      <div className="absolute inset-y-0 left-0 w-10 bg-linear-to-r from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
+      <div className="absolute inset-y-0 right-0 w-10 bg-linear-to-l from-gray-100 dark:from-neutral-900 to-transparent pointer-events-none" />
     </div>
   );
 };
@@ -133,7 +133,7 @@ const ChatDisplay: React.FC<{ conversation: Message[] }> = ({
         className={`flex ${isUser ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap break-words transition-all duration-300 ${isUser ? "bg-neutral-200 dark:bg-neutral-700 rounded-tr-none" : "bg-white dark:bg-neutral-800/50 rounded-tl-none text-gray-900 dark:text-neutral-100"}`}
+          className={`max-w-[min(90vw,80ch)] p-4 rounded-xl shadow leading-relaxed whitespace-pre-wrap wrap-break-words transition-all duration-300 ${isUser ? "bg-neutral-200 dark:bg-neutral-700 rounded-tr-none" : "bg-white dark:bg-neutral-800/50 rounded-tl-none text-gray-900 dark:text-neutral-100"}`}
         >
           {type === "summary" && (
             <h3 className="font-semibold text-lg mb-2 pb-1">{initialQuery}</h3>
@@ -297,17 +297,18 @@ const App: React.FC = () => {
             document
               .getElementById(`message-${resMsgId}`)
               ?.scrollIntoView({ behavior: "smooth", block: "end" }),
-          50
+          50,
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         setIsResultMode(true);
-        addMsg({ text: `⚠️ Error: ${err.message}` });
+        const message = err instanceof Error ? err.message : String(err);
+        addMsg({ text: `⚠️ Error: ${message}` });
       } finally {
         setIsSearching(false);
         setIsRefreshing(false);
       }
     },
-    [hasSummary, summaryText, isSearching, lastQuery, isNewsSession]
+    [hasSummary, summaryText, isSearching, lastQuery, isNewsSession],
   );
 
   return (
